@@ -1,0 +1,9 @@
+# Python 3.12.  uv venv --python 3.12 .venv && uv pip install -r requirements.txt --override overrides.txt
+# lerobot pinned to the commit this project was built and the policy trained with (0.5.2 dev).
+lerobot[feetech,dataset] @ git+https://github.com/huggingface/lerobot.git@5c43fa1c
+av>=15,<16            # video decode/encode for LeRobotDataset (pyav backend)
+placo==0.10.1         # FK/IK from the URDF
+scipy>=1.14           # least-squares fits in the calibration scripts
+pandas>=2.0           # dataset parquet inspection
+python-chess>=1.11    # board state and move legality (game loop)
+pyobjc-framework-AVFoundation; sys_platform == "darwin"   # camera name -> index on macOS (chess/cameras.py)

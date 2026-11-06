@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+
+# recorded datasets and training outputs: large, kept out of git (push to the HF Hub instead)
+datasets/
+outputs/
+
+# policy weights: 200 MB per checkpoint, above GitHub's 100 MB file limit (HF Hub or git-lfs)
+policies/*/model.safetensors
+
+# per-run traces and snapshots written by the scripts
+chess/run_logs/
+chess/hover_snaps/
+chess/cam_snaps/
