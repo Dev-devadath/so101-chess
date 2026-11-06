@@ -57,7 +57,7 @@ scripts/train_gpu.sh       copy a dataset to the GPU box, train ACT there, pull 
 scripts/chess_act_env.sh   ports and defaults for the scripts
 docs/DESIGN.md             the overall plan (hybrid IK + learned skills, game loop)
 docs/RECORDING_PLAN.md     how the demos were recorded (rules, blocks, coverage)
-datasets/                  LeRobotDataset folders (not in git)
+datasets/                  LeRobotDataset folders (not in git; see Datasets)
 outputs/                   training outputs pulled from the box (not in git)
 ```
 
@@ -88,10 +88,34 @@ the training box).
    `--policy outputs/act_<name> --ckpt 080000` tries a training checkpoint).
 6. Measure placement: `place_check.py`.
 
-## Datasets and the policy on the Hugging Face Hub
+## Datasets
 
-The policy was trained on `so101_pick3_clean` (112 episodes, 13.5k frames at 30 fps,
-wrist + overhead 640x480, 6-D state and action). Push a dataset and the policy with:
+All are LeRobotDataset v3, 30 fps, two cameras (wrist 640x480, overhead warped to a
+480x480 top-down board view), 6-D state and action (5 joints + gripper, lerobot degrees).
+Every episode starts at the IK hover above a piece and ends with it lifted.
+
+| Dataset | Episodes | Frames | Jaws | Notes |
+|---|---|---|---|---|
+| `so101_pick3_clean` | 112 | 13526 | red TPU V-groove pads | Training set of `act_pick_v1`. `so101_pick3` minus 12 bad demos. |
+| `so101_pick3` | 124 | 15326 | red TPU V-groove pads | Raw recording, all h264. Record new demos into this one. |
+| `so101_pick2` | 96 | 14166 | bare jaws, yellow string wrap | Earlier round. Its policy picked but less reliably: grasp heights varied 8–52 mm. |
+
+`so101_pick3_clean` was made with lerobot's `delete_episodes` (episodes 6, 18, 48, 50, 83,
+89, 101, 102, 107, 110, 120, 121: head grabs, no lift, fingertips >4 mm into the mat). It
+re-encodes the files it cuts as AV1 and copies the rest as h264, so never record into it:
+record into `so101_pick3` and rebuild. The jaw pads change what the wrist camera sees, so
+do not mix `so101_pick2` with pick3 for a policy that runs with the pads.
+
+Load with the pyav backend (torchcodec needs a system FFmpeg):
+
+```python
+from lerobot.datasets import LeRobotDataset
+ds = LeRobotDataset("local/so101_pick3_clean", root="datasets/so101_pick3_clean", video_backend="pyav")
+```
+
+## Pushing to the Hugging Face Hub
+
+Push a dataset and the policy with:
 
 ```sh
 .venv/bin/hf auth login
