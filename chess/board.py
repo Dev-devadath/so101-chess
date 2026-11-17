@@ -123,3 +123,54 @@ def draw_grid(warped):
                 1,
             )
     return out
+
+
+# ---- where a piece's base is, from a before/after pair --------------------------------
+
+SQUARE_MM = 49.0
+BASE_PIXEL_DIFF = 10.0  # per-pixel Lab distance counted as the moved piece (frames minutes apart, same lighting)
+BASE_MARGIN = 0.35  # squares: the search region extends this far past the square on every side
+BASE_MIN_PX = 60  # fewer changed pixels than this: no piece found
+BASE_R_MM = (9.0, 20.0)  # plausible base radius (pawn ~13 mm, king ~19 mm)
+
+
+def piece_base(before, after, sq, nadir, exclude=None):
+    """Where the piece that appeared on sq stands, from two warped frames (any size, same
+    size) taken before and after the move. Returns (d_file_mm, d_rank_mm, radius_mm,
+    changed_px) of the base centre relative to the square centre, or None.
+
+    Pieces lean away from the camera nadir in the warped image, so the edge of the
+    changed blob nearest the nadir is the base rim; the base centre is one radius
+    further along, and its sideways position is the middle of the rim's width.
+    exclude: a square whose changes are ignored (the move's origin, when adjacent)."""
+    size = after.shape[0]
+    sq_px = size / 8
+    f, r = FILES.index(sq[0]), int(sq[1]) - 1
+    cx, cy = f * sq_px + sq_px / 2, (7 - r) * sq_px + sq_px / 2
+    lab = lambda im: cv2.cvtColor(im, cv2.COLOR_BGR2LAB).astype(np.float32)
+    mask = (np.linalg.norm(lab(after) - lab(before), axis=2) > BASE_PIXEL_DIFF).astype(np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+    roi = np.zeros_like(mask)
+    m = (0.5 + BASE_MARGIN) * sq_px
+    roi[max(int(cy - m), 0):int(cy + m), max(int(cx - m), 0):int(cx + m)] = 1
+    if exclude:
+        fe, re_ = FILES.index(exclude[0]), int(exclude[1]) - 1
+        roi[int((7 - re_) * sq_px):int((8 - re_) * sq_px), int(fe * sq_px):int((fe + 1) * sq_px)] = 0
+    mask &= roi
+    ys, xs = np.nonzero(mask)
+    if len(xs) < BASE_MIN_PX:
+        return None
+    d = np.array([cx, cy]) - np.asarray(nadir, float) * size / WARP_SIZE
+    d /= np.linalg.norm(d)
+    perp = np.array([-d[1], d[0]])
+    p = np.stack([xs - cx, ys - cy], 1)
+    s, t = p @ d, p @ perp
+    s_near = np.percentile(s, 1)
+    mm_per_px = SQUARE_MM / sq_px
+    radius = BASE_R_MM[0] / mm_per_px
+    for _ in range(3):  # the rim's width within one radius of the near edge is the diameter
+        band = s < s_near + 1.2 * radius
+        t_lo, t_hi = np.percentile(t[band], 0.5), np.percentile(t[band], 99.5)
+        radius = np.clip((t_hi - t_lo) / 2, BASE_R_MM[0] / mm_per_px, BASE_R_MM[1] / mm_per_px)
+    c = (s_near + radius) * d + (t_lo + t_hi) / 2 * perp
+    return c[0] * mm_per_px, -c[1] * mm_per_px, radius * mm_per_px, len(xs)
