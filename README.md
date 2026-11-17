@@ -1,129 +1,336 @@
 # so101-chess
 
-An SO-101 arm that moves chess pieces on a physical board. Pieces are picked by
-a learned ACT policy and everything around the pick is inverse kinematics:
+A hobby robot arm that plays chess against you on a real board.
+
+You move a piece and press Enter. An overhead webcam works out what you played,
+Stockfish picks a reply, and an SO-101 arm picks the piece up and puts it on its
+new square. Captures and castling included.
+
+<p>
+  <img src="docs/images/top_cam_hover_e2.jpg" height="240" alt="Overhead camera: the arm hovering above e2">
+  <img src="docs/images/wrist_cam_hover_e2.jpg" height="240" alt="Wrist camera: what the pick policy sees from the hover">
+</p>
+
+*Left: the overhead camera, with the arm hovering above e2. Right: the wrist camera
+at the same moment. That second view is all the pick policy gets to look at.*
+
+It works well enough to play a full game, and badly enough that you will be fixing
+a pawn by hand every few moves. Both halves of that sentence are documented below.
+
+## How it works
+
+The obvious way to build this is to train one policy that does the whole move.
+We didn't. Almost everything the arm does is plain inverse kinematics, and a
+learned policy handles only the few seconds where IK is not good enough: closing
+the jaws around a piece.
 
 ```
-park -> IK hover above FROM -> ACT policy: descend, grasp, lift -> IK carry to TO
-     -> IK lower + guided release -> hover -> next move / park
+park ─▶ IK: hover above the piece ─▶ ACT policy: descend, grasp, lift
+     ─▶ IK: glide to the target ─▶ IK: lower, release, back off ─▶ park
 ```
 
-Status (2026-11-06): the pick policy `policies/act_pick_v1` picks every piece type
-on every taught square (10/10 in the last test). Placing is IK only. The game loop
-(`chess/play.py`: board reading, python-chess, Stockfish) plays full games on the arm.
+Why split it this way:
 
-## Hardware
+- **The arm is not accurate enough to grasp blind.** Its servos repeat to about
+  5–13 mm, and a pawn's neck is about 10 mm wide. A policy watching the wrist
+  camera can close that gap; IK cannot.
+- **Everything else is easier to write than to teach.** Travelling above the
+  pieces, setting one down, parking out of the camera's view: these are geometry,
+  and geometry doesn't need 250 demonstrations.
+- **The policy's job stays tiny.** It always starts from the same place (8 cm above
+  a piece, jaws open, pointing down) and always does the same thing. That is why a
+  few hundred demos are enough.
 
-- SO-101 follower arm (6x Feetech STS3215) with red TPU V-groove pads glued on both jaws
-- SO-101 leader arm, used only to record demos
-- Overhead USB camera on a rigid stand ("overhead"), wrist camera on the gripper ("wrist")
-- Mac (Apple silicon, policy runs on MPS) for recording and play; a Linux box with a GPU for training
-- 3D-printed board on a mat; squares a1..h5 are reachable (see `chess/reach_map.py`)
+The chess side is deliberately dumb. The camera only tells empty, white or black
+per square. The position is tracked in software from the starting position, and
+your move is whichever legal move explains the squares that changed.
 
-## Layout
+## Where it stands
 
-```
-chess/                     all the code; run every script from the repo root
-  arm.py                   follower connection, FK/IK (placo + URDF), ramped moves, park/unpark
-  reach_map.py             jaw/tool models, IK for a point with the jaws pointing down, reachability map
-  board.py                 overhead image -> top-down 8x8 warp (board_calib.json)
-  cameras.py               open cameras by name (macOS reshuffles indices)
-  teach_squares.py         teach each square's real tool position with the leader (square_points.json)
-  touch_calib.py           board position in the arm frame from touched squares
-  fit_offsets.py           per-joint lerobot->URDF angle offsets (joint_offset.json)
-  calibrate_squares_cam.py per-square correction measured with the overhead camera
-  calibrate_board.py       click the board corners on the overhead feed (board_calib.json)
-  calibrate_nadir.py       camera nadir from how tall pieces lean
-  align_top_cam.py         re-aim a camera to match a recorded frame
-  hover_squares.py         IK hover above taught squares (the pose the policy starts from)
-  record_pick.py           record pick demos: IK hover, then the leader does descend/grasp/lift
-  run_pick.py              run the pick policy with IK around it (hover, carry, place); the Mover class play.py uses
-  play.py                  play a game: camera reads your move, Stockfish replies, the arm plays it
-  place_check.py           measure where a placed piece landed (overhead camera)
-  board_state.py           empty / white / black per square from the overhead camera
-  gripper_check.py         gripper reading when closed on a piece (sets the thresholds)
-  leader_check.py          watch the leader for encoder jumps
-  cam_view.py              live camera view with fps
-  read_pose.py             torque off, print joints and FK (measures arm.OFFSET)
-  arm_calib.json           board frame in the arm frame (touch_calib)
-  joint_offset.json        lerobot -> URDF joint offsets (fit_offsets)
-  square_points.json       taught tool position per square (teach_squares + calibrate_squares_cam)
-  board_calib.json         overhead board corners (calibrate_board)
-  board_ref.png            empty-board reference for board_state.py
-  top_ref_calib.jpg        overhead reference frame for align_top_cam.py
-  so101_urdf/              SO-101 URDF (new calibration) and the meshes it references
-policies/act_pick_v1/      the pick policy (lerobot pretrained_model folder; weights not in git, see below)
-calibration/               lerobot servo calibration for the follower and leader (copy to ~/.cache, see Setup)
-scripts/train_gpu.sh       copy a dataset to the GPU box, train ACT there, pull checkpoints
-scripts/chess_act_env.sh   ports and defaults for the scripts
-docs/DESIGN.md             the overall plan (hybrid IK + learned skills, game loop)
-docs/RECORDING_PLAN.md     how the demos were recorded (rules, blocks, coverage)
-datasets/                  LeRobotDataset folders (not in git; see Datasets)
-outputs/                   training outputs pulled from the box (not in git)
-```
+Numbers from the last long game we logged with the current policy (13 picks by
+the arm):
+
+| | |
+|---|---|
+| Held on the first attempt | 9 |
+| Held on a retry | 3 |
+| Gave up, finished by hand | 1 |
+
+One arm move takes about 45 seconds, most of it careful travel.
+
+What is still wrong:
+
+- **Some squares are coin flips.** e2, d2 and e4 miss far more than the rest. The
+  arm will not open with the e-pawn for exactly this reason.
+- **Placing is open loop.** A placed piece lands 10–20 mm from the centre of its
+  square. Usually fine, occasionally it confuses the camera.
+- **Only ranks 1–5 are reachable** (40 squares). If Stockfish's move needs a square
+  further away, the arm plays its best reachable move instead, and if there is
+  none you make the move for it.
+- **The camera is fussy about light.** It compares each square against a photo of
+  the empty board, so a lamp moving between that photo and the game causes
+  misreads. Re-take the photo when that happens.
+
+## What you need
+
+- **SO-101 follower arm** (6× Feetech STS3215). Ours has red TPU V-groove pads
+  glued to both jaws; the earlier bare-jaw round grasped less reliably.
+- **SO-101 leader arm**, only for calibration and recording demos.
+- **Two USB cameras**: one overhead on a rigid stand looking down at the board,
+  one on the gripper.
+- **A board with big squares.** Ours is 3D printed with 49 mm squares and pieces
+  that have a clear neck to grab.
+- **A Mac** (Apple silicon) to run everything; the policy runs on MPS.
+- **A Linux machine with a GPU** if you want to train. We used an RTX 4000 SFF Ada
+  (20 GB); a 30k-step fine-tune took about two hours.
+
+Nothing here is Mac-only by design, but the camera lookup in `chess/cameras.py`
+and the serial port names assume macOS. Expect to touch those on Linux.
 
 ## Setup
 
 ```sh
-uv venv --python 3.12 .venv && uv pip install -r requirements.txt --override overrides.txt
-mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/so_follower ~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader
-cp calibration/my_follower.json ~/.cache/huggingface/lerobot/calibration/robots/so_follower/
-cp calibration/my_leader.json   ~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/
+git clone https://github.com/Dev-devadath/so101-chess && cd so101-chess
+uv venv --python 3.12 .venv
+uv pip install -r requirements.txt --override overrides.txt
+brew install stockfish
 ```
 
-Serial ports are set in `chess/arm.py` (follower) and `chess/teach_squares.py` (leader);
-`scripts/chess_act_env.sh` has the same two. The policy weights: put
-`model.safetensors` into `policies/act_pick_v1/` (from the HF Hub once pushed, or from
-the training box).
+The `--override` is not optional: lerobot wants numpy below 2.3, placo needs 2.3,
+and the project runs on 2.3.
 
-## Workflow
+Then three things that are specific to your hardware:
 
-1. Calibrate (once per physical setup): `fit_offsets.py` / `touch_calib.py` for the arm,
-   `teach_squares.py` then `calibrate_squares_cam.py` for the squares, `calibrate_board.py`
-   for the overhead camera. Check with `reach_map.py` (dry run, no arm) and `hover_squares.py`.
-2. Check the hardware: `cam_view.py wrist|top`, `gripper_check.py`, `leader_check.py`.
-3. Record demos: `record_pick.py` as in `docs/RECORDING_PLAN.md`.
-4. Train on the box: `DATASET=<name> STEPS=100000 sh scripts/train_gpu.sh start`, then
-   `log` and `pull`. The result lands in `outputs/act_<name>`.
-5. Play a move: `.venv/bin/python chess/run_pick.py d2 d4` (defaults to `policies/act_pick_v1`;
-   `--policy outputs/act_<name> --ckpt 080000` tries a training checkpoint).
-6. Measure placement: `place_check.py`.
-7. Play a game (`brew install stockfish` once): `board_state.py --ref` on the empty board, set up
-   the pieces, park the arm, then `.venv/bin/python chess/play.py [--skill 5] [--no-arm]`.
-   Captured pieces go to a drop zone 1.5 squares past h1, off the board: keep it clear.
-   Logic tests without hardware: `.venv/bin/python tests/test_play.py`.
+1. **Serial ports.** Set the follower's in `chess/arm.py` (`PORT`) and the leader's
+   in `chess/teach_squares.py` (`LEADER_PORT`). `scripts/chess_act_env.sh` has the
+   same two.
+2. **Servo calibration.** Calibrate both arms with lerobot's own tool under the ids
+   `my_follower` and `my_leader`. The files in `calibration/` are ours and only
+   fit our arms; they are in the repo so our datasets stay reproducible.
+3. **Policy weights.** They live on the Hugging Face Hub, not in git:
+
+   ```sh
+   .venv/bin/hf download Dev-devadath/so101-chess-act-pick-wrist-v4 --local-dir policies/so101-chess-act-pick-wrist-v4
+   ```
+
+   It only works on a setup like ours (same jaw pads in the wrist view, same hover
+   start), so expect to record and train your own; see
+   [Train your own](#train-your-own-pick-policy).
+
+Check that the basics work before going further:
+
+```sh
+.venv/bin/python chess/cam_view.py wrist     # live view + fps; also: top
+.venv/bin/python chess/leader_check.py       # watch the leader for encoder jumps
+.venv/bin/python tests/test_play.py          # game logic, no hardware needed
+```
+
+## Calibrating your setup
+
+Our calibration files are in the repo, but they describe our table. For your own
+board you redo all of it, once, in this order. Every script explains itself at the
+top of the file, and the board must be **empty** for all of them.
+
+| Step | Script | What it gives you |
+|---|---|---|
+| 1 | `chess/touch_calib.py` | Where the board is, by resting the gripper on 8+ squares by hand |
+| 2 | `chess/fit_offsets.py <square_mm>` | Joint angle corrections that make the model match those touches |
+| 3 | `chess/teach_squares.py` | The real position of every reachable square, nudged in with the leader |
+| 4 | `chess/calibrate_board.py` | The board's corners in the overhead image |
+| 5 | `chess/calibrate_nadir.py` | The point straight under the camera (tall pieces lean away from it) |
+| 6 | `chess/calibrate_squares_cam.py` | A final per-square correction, measured by the camera |
+
+Run each as `.venv/bin/python chess/<script>` from the repo root.
+
+Then look before you trust it: `chess/reach_map.py` prints which squares solve
+(no arm needed), and `chess/hover_squares.py` sends the arm to hover above each
+one so you can see whether it is really centred.
+
+Steps 4 and 5 need redoing whenever the camera stand gets bumped.
+`chess/align_top_cam.py` helps you aim it back at the old view instead.
+
+## Playing a game
+
+Each session:
+
+```sh
+.venv/bin/python chess/board_state.py --ref    # photo of the EMPTY board, in the light you'll play in
+```
+
+Set up the pieces with White on the arm's side, park the arm, keep your hands
+out of the picture, and:
+
+```sh
+.venv/bin/python chess/play.py --policy policies/so101-chess-act-pick-wrist-v4 --ensemble --skill 3
+```
+
+- `--policy` takes either a `pretrained_model` folder or a training output under
+  `outputs/` (add `--ckpt 030000` for a specific checkpoint).
+- `--ensemble` re-plans every frame. Our current policies need it.
+- `--skill` is Stockfish's level, 0–20.
+- `--no-arm` runs the game without the robot. You make the arm's moves by hand
+  and the camera still reads the board. Good for testing the vision.
+
+The arm is always White. Make your move, press Enter. If the camera can't work
+out what you did, type the move instead (`e5`, `Nf6`, `e7e5`).
+
+Captured pieces are dropped 1.5 squares past h1, off the board. Keep that spot
+clear.
+
+To try a single move without a game:
+
+```sh
+.venv/bin/python chess/run_pick.py d2 d4 --policy policies/so101-chess-act-pick-wrist-v4 --ensemble
+```
+
+Everything the arm does is logged to `chess/run_logs/`: a video of every pick
+attempt, a video and a strip of stills for every placement, and a frame for every
+camera misread. When something goes wrong, the answer is almost always in there.
+
+## Train your own pick policy
+
+### 1. Record
+
+```sh
+.venv/bin/python chess/record_pick.py --dataset so101_pick3 --back --jitter 6 e2 d2 c2 g1
+```
+
+The arm flies to the hover above each square by itself. You press Enter, take
+over with the leader, go down, grasp, lift, and press Enter again. Each demo is
+about five seconds of recording.
+
+- `--back` puts the piece back on its own square afterwards, so you can record on
+  a full board.
+- `--jitter 6` starts each demo up to 6 mm off-centre, so you have to re-align
+  over the piece. Without it the policy learns to descend without looking.
+- `--resume` appends to an existing dataset.
+
+`docs/RECORDING_PLAN.md` has the rules we recorded by. The short version: do
+every demo the same way, and record the situations the game will actually
+produce, not the easy ones.
+
+### 2. Throw away the bad ones
+
+Watch your demos back and delete the head grabs, the ones that never lifted, and
+the ones where the fingertips dug into the mat. We dropped 24 of 271. Use
+lerobot's `delete_episodes`; it writes a new dataset, so keep recording into the
+raw one and rebuild the clean copy from it.
+
+### 3. Train
+
+`scripts/train_gpu.sh` copies the dataset to a GPU machine over ssh, trains
+there, and pulls the result back:
+
+```sh
+GPU_HOST=you@gpu-box DATASET=so101_pick3_clean STEPS=100000 sh scripts/train_gpu.sh start
+sh scripts/train_gpu.sh log      # follow along
+sh scripts/train_gpu.sh pull     # checkpoints land in outputs/act_<dataset>
+```
+
+To continue from a policy you already have instead of starting over:
+
+```sh
+PRETRAINED=outputs/act_<old>/checkpoints/last/pretrained_model DATASET=<new set> STEPS=30000 sh scripts/train_gpu.sh start
+```
+
+The script expects `~/lerobot-arm` on the box with a `./venv` that has lerobot
+and CUDA. Read its header before the first run; it is short.
 
 ## Datasets
 
-All are LeRobotDataset v3, 30 fps, two cameras (wrist 640x480, overhead warped to a
-480x480 top-down board view), 6-D state and action (5 joints + gripper, lerobot degrees).
-Every episode starts at the IK hover above a piece and ends with it lifted.
+All LeRobotDataset v3, 30 fps, 6-D state and action (5 joints + gripper, in
+lerobot degrees). Every episode starts at the hover above a piece and ends with
+the piece lifted.
 
-| Dataset | Episodes | Frames | Jaws | Notes |
-|---|---|---|---|---|
-| `so101_pick3_clean` | 112 | 13526 | red TPU V-groove pads | Training set of `act_pick_v1`. `so101_pick3` minus 12 bad demos. |
-| `so101_pick3` | 124 | 15326 | red TPU V-groove pads | Raw recording, all h264. Record new demos into this one. |
-| `so101_pick2` | 96 | 14166 | bare jaws, yellow string wrap | Earlier round. Its policy picked but less reliably: grasp heights varied 8–52 mm. |
+| Dataset | Episodes | Frames | What it is |
+|---|---|---|---|
+| [`so101_pick3`](https://huggingface.co/datasets/Dev-devadath/so101_pick3) | 271 | 39,593 | The raw recording, bad demos included. Record new demos into this one. |
+| [`so101_pick3_wrist_v4`](https://huggingface.co/datasets/Dev-devadath/so101_pick3_wrist_v4) | 247 | 35,982 | The above minus 24 bad demos, wrist camera only. Trains the current policy. |
+| [`so101_pick3_clean`](https://huggingface.co/datasets/Dev-devadath/so101_pick3_clean) | 112 | 13,526 | The first round, on a near-empty board, both cameras. Trained `act_pick_v1`. |
+| [`so101_pick2`](https://huggingface.co/datasets/Dev-devadath/so101_pick2) | 96 | 14,166 | Older still: bare jaws wrapped in string, inconsistent demos. Don't mix it with the others. |
 
-`so101_pick3_clean` was made with lerobot's `delete_episodes` (episodes 6, 18, 48, 50, 83,
-89, 101, 102, 107, 110, 120, 121: head grabs, no lift, fingertips >4 mm into the mat). It
-re-encodes the files it cuts as AV1 and copies the rest as h264, so never record into it:
-record into `so101_pick3` and rebuild. The jaw pads change what the wrist camera sees, so
-do not mix `so101_pick2` with pick3 for a policy that runs with the pads.
-
-Load with the pyav backend (torchcodec needs a system FFmpeg):
+Each dataset's page lists its known problems. Load one with the pyav backend,
+since torchcodec wants a system FFmpeg:
 
 ```python
 from lerobot.datasets import LeRobotDataset
-ds = LeRobotDataset("local/so101_pick3_clean", root="datasets/so101_pick3_clean", video_backend="pyav")
+ds = LeRobotDataset("Dev-devadath/so101_pick3_wrist_v4", video_backend="pyav")
 ```
 
-## Pushing to the Hugging Face Hub
+And the policies:
 
-Push a dataset and the policy with:
+| Policy | Trained on | Status |
+|---|---|---|
+| [`so101-chess-act-pick-wrist-v4`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-wrist-v4) | `so101_pick3_wrist_v4` | Current. Run with `--ensemble`. |
+| [`so101-chess-act-pick-wrist-v3`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-wrist-v3) | first 205 episodes of the same | Weak mid-board. Kept as v4's baseline. |
+| [`so101-chess-act-pick-v1`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-v1) | `so101_pick3_clean` | Wrist + overhead. Fine on an empty board, fails in a real game. |
 
-```sh
-.venv/bin/hf auth login
-.venv/bin/python -c "from lerobot.datasets import LeRobotDataset as D; D('<user>/so101_pick3_clean', root='datasets/so101_pick3_clean').push_to_hub()"
-.venv/bin/hf upload <user>/so101-chess-act-pick policies/act_pick_v1 .
+## What we learned the hard way
+
+- **Record what the game looks like.** Our first 112 demos were on a nearly empty
+  board. The policy was 10 for 10 in tests, then in a real game the black pieces
+  at the far end shifted its grasps half a square: it had been aiming partly from
+  the overhead camera's view of an empty board. We dropped that camera and kept
+  adding demos from real positions: the starting position, then the full back
+  ranks, then the middle of the board. Each round fixed the squares it covered
+  and nothing else.
+- **The policy memorises more than it looks.** Send it to e2 five times and it
+  goes to almost exactly the same spot five times, wherever the pawn is. More
+  data widened the set of squares it knows. It did not teach it to aim.
+- **Our attempt to fix that failed.** We retrained with joint angles measured
+  relative to the start of each pick, hoping to force it to use the camera. It
+  got worse: one grasp in five, closing the jaws in mid-air.
+  `scripts/make_relative.py` is still here if you want to try your luck.
+- **Retry from somewhere else.** Retrying a miss from the same hover repeats the
+  same miss. Shifting the start by a few millimetres lets many retries succeed.
+- **The gripper has a fixed jaw, and it matters.** Only one jaw moves. After
+  opening, the other is still touching the piece, and lifting straight up drags
+  the piece along. The arm now slides sideways to centre the open jaws first.
+- **Log everything.** Nearly every fix in this repo came from watching a saved
+  video of the failure, not from reasoning about what probably happened.
+
+## Repository layout
+
 ```
+chess/
+  play.py                  the game loop
+  run_pick.py              one move: hover, policy pick, carry, place (the Mover class)
+  record_pick.py           record pick demos with the leader
+  arm.py                   follower connection, FK/IK (placo + URDF), moves, park
+  reach_map.py             jaw and tool geometry, IK with the jaws pointing down
+  hover_squares.py         the hover pose above each square; the drop zone
+  board.py                 overhead image -> top-down 8x8 view
+  board_state.py           empty / white / black per square
+  cameras.py               find cameras by name (macOS shuffles the indices)
+
+  touch_calib.py  fit_offsets.py  teach_squares.py          arm calibration
+  calibrate_board.py  calibrate_nadir.py  align_top_cam.py  camera calibration
+  calibrate_squares_cam.py                                  per-square correction
+
+  place_check.py           measure where a placed piece landed
+  gripper_check.py         gripper reading when closed on a piece
+  leader_check.py  leader_gripper_range.py                  leader arm health
+  cam_view.py  read_pose.py                                 small debugging tools
+
+  *.json  board_ref.png  top_ref_calib.jpg                  our calibration data
+  so101_urdf/              the SO-101 URDF and meshes
+scripts/
+  train_gpu.sh             train on a remote GPU box, pull the checkpoints
+  make_relative.py         convert a dataset to relative joint angles
+  chess_act_env.sh         ports and defaults shared by the scripts
+policies/act_pick_v1/      first pick policy (config and notes; weights not in git)
+calibration/               our lerobot servo calibration
+docs/                      DESIGN.md (the original plan), RECORDING_PLAN.md
+tests/                     offline tests for the board and game logic
+```
+
+Run every script from the repo root.
+
+## Credits
+
+Built on [LeRobot](https://github.com/huggingface/lerobot) for arm control,
+recording and training, the [SO-101](https://github.com/TheRobotStudio/SO-ARM100)
+arm from TheRobotStudio, the [ACT](https://tonyzhaozh.github.io/aloha/) policy,
+[placo](https://github.com/Rhoban/placo) for kinematics,
+[python-chess](https://github.com/niklasf/python-chess) and
+[Stockfish](https://stockfishchess.org).
