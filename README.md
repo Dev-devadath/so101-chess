@@ -6,11 +6,11 @@ You move a piece and press Enter. An overhead webcam works out what you played,
 Stockfish picks a reply, and an SO-101 arm picks the piece up and puts it on its
 new square. Captures and castling included.
 
-https://github.com/user-attachments/assets/78aef2fe-ff66-46dd-ae1f-32360a0a9eea
+https://github.com/user-attachments/assets/e4a3fb24-c142-4289-a915-d2ebf2eec849
 
 *A game against the arm. It plays White, from its side of the board.*
 
-<video src="https://github.com/user-attachments/assets/4427285b-5128-40b6-9695-e10c26a886a9" width="320"></video>
+<video src="https://github.com/user-attachments/assets/90a5e55c-688a-4efb-a2df-a29211e4c91c" width="320"></video>
 
 *Close up of a few moves, from an earlier test.*
 
