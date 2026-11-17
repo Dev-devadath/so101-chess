@@ -20,6 +20,20 @@ from reach_map import HOVER_M, JAW_ROLL_DEG, calib_roll, solve_point
 from teach_squares import POINTS_PATH, surface_point
 
 
+# Drop zone for captured pieces: off the board past the h-file, beside rank 1
+# (solves at both jaw rolls with ~0 mm error). Synthesised from a taught square.
+DROP = "drop"
+DROP_FROM = "h1"
+DROP_FILE_STEPS = 1.5
+
+
+def add_drop_zone(taught, calib):
+    """Insert the drop zone into the taught points so hover_plan/square_target accept it."""
+    xyz = np.asarray(taught[DROP_FROM]["xyz"]) + DROP_FILE_STEPS * np.asarray(calib["file_dir"])
+    taught[DROP] = {"xyz": xyz.tolist(), **{k: v for k, v in taught[DROP_FROM].items() if k == "jaw_xy_mm"}}
+    return taught
+
+
 def square_target(taught, calib, sq):
     """Surface centre of a taught square for poses at the JAW roll.
 
