@@ -10,7 +10,7 @@ park -> IK hover above FROM -> ACT policy: descend, grasp, lift -> IK carry to T
 
 Status (2026-11-06): the pick policy `policies/act_pick_v1` picks every piece type
 on every taught square (10/10 in the last test). Placing is IK only. The game loop
-(board reading, python-chess, Stockfish) is the next step.
+(`chess/play.py`: board reading, python-chess, Stockfish) plays full games on the arm.
 
 ## Hardware
 
@@ -37,7 +37,8 @@ chess/                     all the code; run every script from the repo root
   align_top_cam.py         re-aim a camera to match a recorded frame
   hover_squares.py         IK hover above taught squares (the pose the policy starts from)
   record_pick.py           record pick demos: IK hover, then the leader does descend/grasp/lift
-  run_pick.py              run the pick policy with IK around it (hover, carry, place)
+  run_pick.py              run the pick policy with IK around it (hover, carry, place); the Mover class play.py uses
+  play.py                  play a game: camera reads your move, Stockfish replies, the arm plays it
   place_check.py           measure where a placed piece landed (overhead camera)
   board_state.py           empty / white / black per square from the overhead camera
   gripper_check.py         gripper reading when closed on a piece (sets the thresholds)
@@ -87,6 +88,10 @@ the training box).
 5. Play a move: `.venv/bin/python chess/run_pick.py d2 d4` (defaults to `policies/act_pick_v1`;
    `--policy outputs/act_<name> --ckpt 080000` tries a training checkpoint).
 6. Measure placement: `place_check.py`.
+7. Play a game (`brew install stockfish` once): `board_state.py --ref` on the empty board, set up
+   the pieces, park the arm, then `.venv/bin/python chess/play.py [--skill 5] [--no-arm]`.
+   Captured pieces go to a drop zone 1.5 squares past h1, off the board: keep it clear.
+   Logic tests without hardware: `.venv/bin/python tests/test_play.py`.
 
 ## Datasets
 
