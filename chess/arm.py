@@ -65,19 +65,24 @@ TRACK_TOL_DEG = 0.3
 TRACK_ITERS = 5
 
 
-def move_to(robot, q_target, duration_s=2.0, hz=30, settle_s=0.4):
+def move_to(robot, q_target, duration_s=2.0, hz=30, settle_s=0.4, trim=True):
     """Linear ramp in joint space to q_target, then trim out steady-state error.
 
     Under load the servos settle a degree or two short of the command (gravity
     droop), which is ~1 cm at the tool. After the ramp, re-command the target
     plus the measured shortfall a few times. Returns the final error (deg).
+    trim=False: a pass-through pose where the exact end point does not matter; the
+    ramp eases in and out and returns at once, with no settling or trimming.
     """
     q0 = read_joints(robot)
     q_target = np.asarray(q_target, float)
     n = max(1, int(duration_s * hz))
     for i in range(1, n + 1):
-        send_joints(robot, q0 + (q_target - q0) * i / n)
+        s = i / n
+        send_joints(robot, q0 + (q_target - q0) * (s if trim else s * s * (3 - 2 * s)))
         time.sleep(1.0 / hz)
+    if not trim:
+        return read_joints(robot) - q_target
     q_cmd = q_target.copy()
     for _ in range(TRACK_ITERS):
         time.sleep(settle_s)
@@ -107,14 +112,21 @@ def _travel(pan_urdf):
 
 
 PARK_GRIPPER = 2.0  # closed; not 0, so the servo does not stall against the jaw
+TRANSIT_DEG_S = 90.0  # mean speed of the fastest joint on the moves between park, travel and hover
+
+
+def transit(robot, q_target):
+    """Eased move to a pass-through pose at TRANSIT_DEG_S, without settling."""
+    q_target = np.asarray(q_target, float)
+    move_to(robot, q_target, duration_s=max(0.5, np.abs(q_target - read_joints(robot)).max() / TRANSIT_DEG_S), trim=False)
 
 
 def park(robot):
     """Rise in place, swing to the side, fold down into PARK_RAW, close the gripper."""
     q_park = PARK_RAW - OFFSET
-    move_to(robot, _travel(read_joints(robot)[0]), duration_s=2.0)
-    move_to(robot, _travel(q_park[0]), duration_s=2.0)
-    move_to(robot, q_park, duration_s=2.0)
+    transit(robot, _travel(read_joints(robot)[0]))
+    transit(robot, _travel(q_park[0]))
+    move_to(robot, q_park, duration_s=max(1.0, np.abs(q_park - read_joints(robot)).max() / TRANSIT_DEG_S))  # trimmed: the camera reads the board around the parked arm
     send_joints(robot, read_joints(robot), gripper=PARK_GRIPPER)
     time.sleep(0.7)
 
