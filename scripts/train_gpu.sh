@@ -4,6 +4,8 @@
 #   POLICY=smolvla sh scripts/train_gpu.sh start   fine-tune lerobot/smolvla_base instead (needs the HF cache pushed, see below)
 #   sh scripts/train_gpu.sh log      tail the training log on the box
 #   sh scripts/train_gpu.sh pull     copy the checkpoints back to outputs/<POLICY>_<DATASET>
+#   PRETRAINED=policies/act_pick_v1 DATASET=<new set> STEPS=20000 sh scripts/train_gpu.sh start
+#                                    warm-start ACT from a pretrained_model folder (pushed to the box if not there)
 #   sh scripts/train_gpu.sh resume   resume from the last checkpoint on the box (after a crash/reboot)
 #   sh scripts/train_gpu.sh autoresume   install a @reboot cron job on the box that runs the resume
 # GPU_HOST is an ssh target (default: the "gpu" alias in ~/.ssh/config; the box's
@@ -16,9 +18,11 @@
 GPU_HOST=${GPU_HOST:-gpu}
 REMOTE=lerobot-arm   # relative to the login home dir; a local ~ would expand to the Mac path
 POLICY=${POLICY:-act}
+PRETRAINED=${PRETRAINED:-}   # act only: a pretrained_model folder (relative to the repo root) to warm-start from
 case "$POLICY" in
   act)     RUN=act_$DATASET; LOG=train_$DATASET.log
-           POLICY_ARGS="--policy.type=act --policy.use_amp=true"; DEF_STEPS=80000 ;;
+           if [ -n "$PRETRAINED" ]; then POLICY_ARGS="--policy.path=$PRETRAINED --policy.use_amp=true"; DEF_STEPS=20000
+           else POLICY_ARGS="--policy.type=act --policy.use_amp=true"; DEF_STEPS=80000; fi ;;
   smolvla) RUN=smolvla_$DATASET; LOG=train_$RUN.log; OUT_DIR=outputs/$RUN
            POLICY_ARGS="--policy.path=lerobot/smolvla_base --policy.load_vlm_weights=false --rename_map='$SMOLVLA_RENAME_MAP'"; DEF_STEPS=20000 ;;
            # load_vlm_weights: the checkpoint already holds the VLM weights; true would fetch 2 GB from the hub
@@ -29,6 +33,12 @@ case "${1:-start}" in
   start)
     if ssh $GPU_HOST "test -d $REMOTE/datasets/$DATASET"; then echo "dataset already on the box, not copying"; else
       COPYFILE_DISABLE=1 tar --no-xattrs -C datasets -cf - $DATASET | ssh $GPU_HOST "mkdir -p $REMOTE/datasets && tar -C $REMOTE/datasets -xf -" || exit 1
+    fi
+    if [ -n "$PRETRAINED" ]; then
+      if ssh $GPU_HOST "test -f $REMOTE/$PRETRAINED/model.safetensors"; then echo "pretrained policy already on the box, not copying"; else
+        COPYFILE_DISABLE=1 tar --no-xattrs -C "$(dirname $PRETRAINED)" -cf - "$(basename $PRETRAINED)" \
+          | ssh $GPU_HOST "mkdir -p $REMOTE/$(dirname $PRETRAINED) && tar -C $REMOTE/$(dirname $PRETRAINED) -xf -" || exit 1
+      fi
     fi
     ssh $GPU_HOST "cd $REMOTE && HF_HUB_OFFLINE=1 nohup ./venv/bin/lerobot-train \
       $POLICY_ARGS --policy.device=cuda --policy.push_to_hub=false \
