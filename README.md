@@ -6,13 +6,13 @@ You move a piece and press Enter. An overhead webcam works out what you played,
 Stockfish picks a reply, and an SO-101 arm picks the piece up and puts it on its
 new square. Captures and castling included.
 
-<p>
-  <img src="docs/images/top_cam_hover_e2.jpg" height="240" alt="Overhead camera: the arm hovering above e2">
-  <img src="docs/images/wrist_cam_hover_e2.jpg" height="240" alt="Wrist camera: what the pick policy sees from the hover">
-</p>
+https://github.com/user-attachments/assets/78aef2fe-ff66-46dd-ae1f-32360a0a9eea
 
-*Left: the overhead camera, with the arm hovering above e2. Right: the wrist camera
-at the same moment. That second view is all the pick policy gets to look at.*
+*A game against the arm. It plays White, from its side of the board.*
+
+<video src="https://github.com/user-attachments/assets/4427285b-5128-40b6-9695-e10c26a886a9" width="320"></video>
+
+*Close up of a few moves, from an earlier test.*
 
 It works well enough to play a full game, and badly enough that you will be fixing
 a pawn by hand every few moves. Both halves of that sentence are documented below.
@@ -28,6 +28,14 @@ the jaws around a piece.
 park ─▶ IK: hover above the piece ─▶ ACT policy: descend, grasp, lift
      ─▶ IK: glide to the target ─▶ IK: lower, release, back off ─▶ park
 ```
+
+<p>
+  <img src="docs/images/top_cam_hover_e2.jpg" height="240" alt="Overhead camera: the arm hovering above e2">
+  <img src="docs/images/wrist_cam_hover_e2.jpg" height="240" alt="Wrist camera: what the pick policy sees from the hover">
+</p>
+
+*Left: the overhead camera, with the arm hovering above e2. Right: the wrist camera
+at the same moment. That second view is all the pick policy gets to look at.*
 
 Why split it this way:
 
