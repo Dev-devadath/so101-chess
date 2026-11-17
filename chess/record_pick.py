@@ -22,7 +22,12 @@ the same board view whatever the tripod position. Run calibrate_board.py
 first each session; the calibration used is copied into the dataset's meta/.
 
 Usage:  .venv/bin/python chess/record_pick.py [--episodes 50] [--dataset so101_pick] [--resume]
-                                               [--swap-every 8] [--place-h 25] [squares...]
+                                               [--swap-every 8] [--place-h 25] [--back] [--jitter 6] [squares...]
+--back: the piece goes back onto its own square after each episode (recording on a full
+board, where the next square in the list is occupied).
+--jitter MM: start each episode from the hover shifted by a random offset of up to MM mm in
+the board plane, so the demo has to re-align over the piece. The policy only learns the
+corrections it has seen: demos that start exactly above the piece teach a blind descent.
 An episode only starts once the leader gripper is near GRIPPER_OPEN, and the fingertip
 height is printed live while recording, so every demo starts and grasps alike
 (see RECORDING_PLAN.md).
@@ -66,6 +71,8 @@ GRIPPER_OPEN_TOL = 5.0  # the leader gripper must be this close to GRIPPER_OPEN 
 GRIPPER_CLOSED = 30.0  # follower reading below this = holding (with the pads, king/queen at the widest part read up to 24)
 MAX_DELTA_DEG = 70.0  # leader further than this from where it was when recording started: hold the follower (the old demos peak at 65)
 PLACE_GAP_M = 0.002  # piece base this far above the mat when the jaws open
+MIN_FRAMES = 45  # an episode shorter than this (1.5 s; the shortest real demo is 98 frames) is an accidental Enter
+JITTER_MAX_JUMP_DEG = 15.0  # a jittered hover further than this on any joint is an IK branch jump, not a shift
 DATASETS_DIR = Path(__file__).parent.parent / "datasets"
 
 
@@ -179,10 +186,30 @@ def record_episode(robot, top, leader, dataset, q_hover, tip_height):
         if key is not None:
             print(f"\n   {n} frames ({n / FPS:.1f} s), grasped {lowest * 1000:.0f} mm above the mat"
                   + (f"; camera stalls: wrist {stalls}, top {top.stalls}" if stalls or top.stalls else ""))
+            if key not in ("q", "r") and (n < MIN_FRAMES or q_close is None):
+                # Enter hit by accident: a one-frame episode breaks lerobot's episode index (the whole batch of 10 is lost)
+                print(f"   {n} frames and {'no piece held' if q_close is None else 'a piece held'}: not a pick, discarding")
+                key = "r"
             return key, lowest, q_close
         dt = time.perf_counter() - t0
         if dt < 1 / FPS:
             time.sleep(1 / FPS - dt)
+
+
+def jittered_hover(kin, calib, taught, tool, sq, q_h, h, r, mm):
+    """q_h (the hover above sq at height h, roll r) shifted by a random offset of up to mm in the board plane (uniform in a disc)."""
+    n = calib["normal"]
+    fd, rd = (np.asarray(calib[k]) / np.linalg.norm(calib[k]) for k in ("file_dir", "rank_dir"))
+    ang, rad = random.uniform(0, 2 * np.pi), mm * np.sqrt(random.random())
+    df, dr = rad * np.cos(ang), rad * np.sin(ang)
+    target = square_target(taught, calib, sq) + h * n + (df * fd + dr * rd) / 1000
+    q, err, _, bad = solve_point(kin, target, -n, held_tool(tool, GRIPPER_OPEN), r, q_warm=q_h)
+    jump = np.abs(np.asarray(q)[:4] - np.asarray(q_h)[:4]).max()
+    if bad or err > 0.005 or jump > JITTER_MAX_JUMP_DEG:  # a branch jump would snap the wrist, not shift it
+        print(f"   jitter IK failed ({err * 1000:.0f} mm {bad}, jump {jump:.0f} deg); using the exact hover")
+        return q_h
+    print(f"   hover offset: {df:+.0f} mm along the files, {dr:+.0f} mm along the ranks")
+    return q
 
 
 def main():
@@ -194,6 +221,8 @@ def main():
     ap.add_argument("--swap-every", type=int, default=SWAP_EVERY, help="prompt to change the piece every N episodes (0 = never, single-piece block)")
     ap.add_argument("--place-h", type=float, default=25.0, help="mm above the mat to open the gripper when placing (only until the first grasp height is known)")
     ap.add_argument("--release", type=float, default=15.0, help="open this much beyond the held reading when placing (keeps the jaws off the neighbours)")
+    ap.add_argument("--back", action="store_true", help="set the piece back down on its own square after each episode (full board: every other square is occupied)")
+    ap.add_argument("--jitter", type=float, default=0.0, help="mm: start each episode from the hover shifted by a random offset of up to this much in the board plane (0 = exact hover)")
     a = ap.parse_args()
 
     kin = Kinematics()
@@ -242,6 +271,11 @@ def main():
         while i < len(order):
             sq = order[i]
             q_h, _ = plans(sq)
+            q_start = q_h
+            if a.jitter:
+                _, h, _, r = hover_plan(kin, calib, taught, held_tool(tool, GRIPPER_OPEN), roll, sq)
+                q_start = jittered_hover(kin, calib, taught, tool, sq, q_h, h, r, a.jitter)
+                move_to(robot, q_start, duration_s=0.8)
             if a.swap_every and saved and saved % a.swap_every == 0:
                 print(f"\n** {saved} saved: swap in a different piece type on {sq} (and rearrange neighbours) **")
             if input(f"\n[{saved + 1}/{a.episodes}] hovering over {sq}. Leader IN HAND and still, gripper open. Enter to record (q quit)... ").strip() == "q":
@@ -253,12 +287,14 @@ def main():
                 while abs(g_lead - GRIPPER_OPEN) > GRIPPER_OPEN_TOL:
                     time.sleep(0.2)
                     g_lead = leader.get_action()["gripper.pos"]
+                    print(f"\r   leader gripper now {g_lead:5.1f} (need {GRIPPER_OPEN - GRIPPER_OPEN_TOL:.0f}-{GRIPPER_OPEN + GRIPPER_OPEN_TOL:.0f})   ", end="", flush=True)
+                print()
             # match the follower gripper to the leader's before handing over, so it does not snap
             g_now, q_now = read_gripper(robot), read_joints(robot)
             for k in range(1, 11):
                 send_joints(robot, q_now, gripper=g_now + (g_lead - g_now) * k / 10)
                 time.sleep(0.05)
-            key, grasp_h, q_close = record_episode(robot, top, leader, dataset, q_h, tip_height_fn(sq))
+            key, grasp_h, q_close = record_episode(robot, top, leader, dataset, q_start, tip_height_fn(sq))
             if key == "q":
                 dataset.clear_episode_buffer()
                 break
@@ -272,7 +308,7 @@ def main():
             i += 1
             # carry the piece to the next square via the raised travel pose and set its BASE
             # down PLACE_GAP_M above the mat (base located from the grasp pose + gripper reading)
-            nxt = order[i] if i < len(order) else sq
+            nxt = sq if a.back else (order[i] if i < len(order) else sq)
             g_held = read_gripper(robot)
             piece = held_piece_tool(kin, q_close, g_held, tool, square_target(taught, calib, sq), n) if q_close is not None else None
             q_h2, q_p2 = plans(nxt, piece)
@@ -282,6 +318,8 @@ def main():
             send_joints(robot, read_joints(robot), gripper=g_held + a.release)
             time.sleep(0.6)
             move_to(robot, q_h2, duration_s=1.2)
+            if a.back and i < len(order) and order[i] != sq:
+                unpark(robot, plans(order[i])[0])  # the piece stayed here: travel on to the next square's hover
     finally:
         try:
             park(robot)
