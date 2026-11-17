@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/e4a3fb24-c142-4289-a915-d2ebf2eec849
 
 *A game against the arm. It plays White, from its side of the board.*
 
-https://github.com/user-attachments/assets/90a5e55c-688a-4efb-a2df-a29211e4c91c
+https://github.com/user-attachments/assets/3f030c3f-8454-415f-a4c4-e5c49e6064e5
 
 *Close up of a few moves, from an earlier test.*
 
