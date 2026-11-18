@@ -1,10 +1,9 @@
-# so101-chess
+# Chess Playing Robot
 
-A hobby robot arm that plays chess against you on a real board.
+A robotic arm that plays chess against you on a real board.
 
-You move a piece and press Enter. An overhead webcam works out what you played,
-Stockfish picks a reply, and an SO-101 arm picks the piece up and puts it on its
-new square. Captures and castling included.
+You move a piece and press Enter. An overhead webcam works out what you played, and an SO-101 arm picks the piece up and puts it on its
+new square. Captures and castling included every move ;)
 
 https://github.com/user-attachments/assets/e4a3fb24-c142-4289-a915-d2ebf2eec849
 
@@ -12,17 +11,17 @@ https://github.com/user-attachments/assets/e4a3fb24-c142-4289-a915-d2ebf2eec849
 
 https://github.com/user-attachments/assets/3f030c3f-8454-415f-a4c4-e5c49e6064e5
 
-*Close up of a few moves, from an earlier test.*
+*Close up of a few moves..*
 
-It works well enough to play a full game, and badly enough that you will be fixing
-a pawn by hand every few moves. Both halves of that sentence are documented below.
+It works well enough to play a full game, and badly enough that you might have to fix
+a pawn by hand sometimes. Both halves of that sentence are documented below.
 
 ## How it works
 
 The obvious way to build this is to train one policy that does the whole move.
-We didn't. Almost everything the arm does is plain inverse kinematics, and a
+Well I didn't. Almost everything the arm does is plain inverse kinematics, and a
 learned policy handles only the few seconds where IK is not good enough: closing
-the jaws around a piece.
+the jaws around a piece, AKA picking a piece.
 
 ```
 park ─▶ IK: hover above the piece ─▶ ACT policy: descend, grasp, lift
@@ -64,7 +63,7 @@ the arm):
 | Held on a retry | 3 |
 | Gave up, finished by hand | 1 |
 
-One arm move takes about 45 seconds, most of it careful travel.
+One arm move takes about 20 seconds max, most of it careful travel.
 
 What is still wrong:
 
@@ -72,7 +71,7 @@ What is still wrong:
   arm will not open with the e-pawn for exactly this reason.
 - **Placing is open loop.** A placed piece lands 10–20 mm from the centre of its
   square. Usually fine, occasionally it confuses the camera.
-- **Only ranks 1–5 are reachable** (40 squares). If Stockfish's move needs a square
+- **Only ranks 1–5 are reachable (👉🏻👈🏻edge case they says)** (40 squares). If Stockfish's move needs a square
   further away, the arm plays its best reachable move instead, and if there is
   none you make the move for it.
 - **The camera is fussy about light.** It compares each square against a photo of
@@ -86,14 +85,11 @@ What is still wrong:
 - **SO-101 leader arm**, only for calibration and recording demos.
 - **Two USB cameras**: one overhead on a rigid stand looking down at the board,
   one on the gripper.
-- **A board with big squares.** Ours is 3D printed with 49 mm squares and pieces
-  that have a clear neck to grab.
-- **A Mac** (Apple silicon) to run everything; the policy runs on MPS.
+- **A board with big squares.** Ours is the regular green and white mat with 49 mm squares and pieces
+  that have a clear neck to grab (Best if you get same size pieces).
 - **A Linux machine with a GPU** if you want to train. We used an RTX 4000 SFF Ada
   (20 GB); a 30k-step fine-tune took about two hours.
-
-Nothing here is Mac-only by design, but the camera lookup in `chess/cameras.py`
-and the serial port names assume macOS. Expect to touch those on Linux.
+  
 
 ## Setup
 
