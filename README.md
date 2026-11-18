@@ -250,28 +250,29 @@ All LeRobotDataset v3, 30 fps, 6-D state and action (5 joints + gripper, in
 lerobot degrees). Every episode starts at the hover above a piece and ends with
 the piece lifted.
 
-| Dataset | Episodes | Frames | What it is |
-|---|---|---|---|
-| [`so101_pick3`](https://huggingface.co/datasets/Dev-devadath/so101_pick3) | 271 | 39,593 | The raw recording, bad demos included. Record new demos into this one. |
-| [`so101_pick3_wrist_v4`](https://huggingface.co/datasets/Dev-devadath/so101_pick3_wrist_v4) | 247 | 35,982 | The above minus 24 bad demos, wrist camera only. Trains the current policy. |
-| [`so101_pick3_clean`](https://huggingface.co/datasets/Dev-devadath/so101_pick3_clean) | 112 | 13,526 | The first round, on a near-empty board, both cameras. Trained `act_pick_v1`. |
-| [`so101_pick2`](https://huggingface.co/datasets/Dev-devadath/so101_pick2) | 96 | 14,166 | Older still: bare jaws wrapped in string, inconsistent demos. Don't mix it with the others. |
+| On the Hub | Local folder | Episodes | Frames | What it is |
+|---|---|---|---|---|
+| [`so101-chess-pick-raw`](https://huggingface.co/datasets/Dev-devadath/so101-chess-pick-raw) | `so101_pick3` | 271 | 39,593 | The raw recording, bad demos included. Record new demos into this one. |
+| [`so101-chess-pick-wrist-v4`](https://huggingface.co/datasets/Dev-devadath/so101-chess-pick-wrist-v4) | `so101_pick3_wrist_v4` | 247 | 35,982 | The above minus 24 bad demos, wrist camera only. Trains the current policy. |
+| [`so101-chess-pick-v1`](https://huggingface.co/datasets/Dev-devadath/so101-chess-pick-v1) | `so101_pick3_clean` | 112 | 13,526 | The first round, on a near-empty board, both cameras. Trained `act_pick_v1`. |
+| [`so101-chess-pick-v0`](https://huggingface.co/datasets/Dev-devadath/so101-chess-pick-v0) | `so101_pick2` | 96 | 14,166 | Older still: bare jaws wrapped in string, inconsistent demos. Don't mix it with the others. |
 
-Each dataset's page lists its known problems. Load one with the pyav backend,
+Each dataset's page lists its known problems. The local folder names are the ones
+the scripts and commands in this README use. Load one with the pyav backend,
 since torchcodec wants a system FFmpeg:
 
 ```python
 from lerobot.datasets import LeRobotDataset
-ds = LeRobotDataset("Dev-devadath/so101_pick3_wrist_v4", video_backend="pyav")
+ds = LeRobotDataset("Dev-devadath/so101-chess-pick-wrist-v4", video_backend="pyav")
 ```
 
 And the policies:
 
 | Policy | Trained on | Status |
 |---|---|---|
-| [`so101-chess-act-pick-wrist-v4`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-wrist-v4) | `so101_pick3_wrist_v4` | Current. Run with `--ensemble`. |
+| [`so101-chess-act-pick-wrist-v4`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-wrist-v4) | `so101-chess-pick-wrist-v4` | Current. Run with `--ensemble`. |
 | [`so101-chess-act-pick-wrist-v3`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-wrist-v3) | first 205 episodes of the same | Weak mid-board. Kept as v4's baseline. |
-| [`so101-chess-act-pick-v1`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-v1) | `so101_pick3_clean` | Wrist + overhead. Fine on an empty board, fails in a real game. |
+| [`so101-chess-act-pick-v1`](https://huggingface.co/Dev-devadath/so101-chess-act-pick-v1) | `so101-chess-pick-v1` | Wrist + overhead. Fine on an empty board, fails in a real game. |
 
 ## What we learned the hard way
 
